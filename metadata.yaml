@@ -1,0 +1,10 @@
+name: astrbot_plugin_game_board
+display_name: 群游戏推荐榜
+desc: 群友推荐游戏、打分评论，自动抓取 Steam / Bangumi 封面与标签，输出五档榜单图表与 Steam 风格详情卡。
+short_desc: 群友推荐 + 打分 + 五档榜单图
+author: buluger
+version: "0.1.0"
+repo: https://github.com/buluger/astrbot_plugin_game_board
+support_platforms:
+  - aiocqhttp
+astrbot_version: ">=4.16"

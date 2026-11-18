@@ -1,0 +1,73 @@
+{
+  "min_votes_niche": {
+    "description": "小众游戏门槛（打分人数少于该值即视为小众）",
+    "hint": "默认 5。总榜单仍会收录这些游戏，/小众游戏 只单独列出它们。",
+    "type": "int",
+    "default": 5
+  },
+  "enable_steam": {
+    "description": "启用 Steam 数据源",
+    "hint": "关闭后将只能用 Bangumi 或手动方式添加游戏。",
+    "type": "bool",
+    "default": true
+  },
+  "enable_bangumi": {
+    "description": "启用 Bangumi 数据源",
+    "hint": "Steam 搜不到时用它兜底，对 galgame / 日系游戏覆盖较好。",
+    "type": "bool",
+    "default": true
+  },
+  "allow_manual": {
+    "description": "允许手动添加游戏（自己发封面图 + 填标签）",
+    "hint": "适用于手游、独立作品等两个数据源都搜不到的游戏，仅在本群可见。",
+    "type": "bool",
+    "default": true
+  },
+  "steam_language": {
+    "description": "Steam 返回语言",
+    "type": "string",
+    "default": "schinese"
+  },
+  "steam_country": {
+    "description": "Steam 商店区域",
+    "type": "string",
+    "default": "cn"
+  },
+  "cache_days": {
+    "description": "游戏信息缓存天数",
+    "hint": "同一游戏在缓存期内不会重复请求 Steam / Bangumi。",
+    "type": "int",
+    "default": 7
+  },
+  "rate_limit_count": {
+    "description": "写操作限频：时间窗口内最多次数",
+    "type": "int",
+    "default": 3
+  },
+  "rate_limit_window": {
+    "description": "写操作限频：窗口秒数",
+    "type": "int",
+    "default": 10
+  },
+  "comment_max_len": {
+    "description": "单条评论最大字数",
+    "type": "int",
+    "default": 200
+  },
+  "comment_max_per_game": {
+    "description": "每人每个游戏最多评论条数",
+    "type": "int",
+    "default": 20
+  },
+  "pin_recommender_comment": {
+    "description": "详情页置顶推荐人的评论",
+    "type": "bool",
+    "default": true
+  },
+  "detail_max_comments": {
+    "description": "详情页最多渲染的评论条数",
+    "hint": "超出部分只显示「还有 N 条」。",
+    "type": "int",
+    "default": 6
+  }
+}
