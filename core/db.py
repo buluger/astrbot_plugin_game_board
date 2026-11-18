@@ -72,6 +72,13 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 CREATE INDEX IF NOT EXISTS idx_comments_game ON comments(group_id, game_id);
 
+CREATE TABLE IF NOT EXISTS group_settings (
+    group_id    TEXT PRIMARY KEY,
+    board_title TEXT NOT NULL DEFAULT '',   -- 本群自定义榜单标题，空串表示用默认
+    updated_at  INTEGER NOT NULL,
+    updated_by  TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS custom_tags (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id   TEXT NOT NULL,
@@ -379,6 +386,27 @@ class GameStore:
         )
         await self.execute(
             "DELETE FROM submissions WHERE group_id=? AND game_id=?", (group_id, game_id)
+        )
+
+    # ---------- 群设置 ----------
+
+    async def get_board_title(self, group_id: str) -> str:
+        rows = await self.query(
+            "SELECT board_title FROM group_settings WHERE group_id = ?", (group_id,)
+        )
+        return (rows[0]["board_title"] or "") if rows else ""
+
+    async def set_board_title(self, group_id: str, title: str, user_id: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO group_settings (group_id, board_title, updated_at, updated_by)
+            VALUES (?,?,?,?)
+            ON CONFLICT(group_id) DO UPDATE SET
+                board_title = excluded.board_title,
+                updated_at  = excluded.updated_at,
+                updated_by  = excluded.updated_by
+            """,
+            (group_id, title, int(time.time()), user_id),
         )
 
     async def add_custom_tag(self, group_id: str, game_id: int, tag: str, tag_norm: str) -> bool:

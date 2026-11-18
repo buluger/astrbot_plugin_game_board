@@ -1,7 +1,7 @@
 {
   "min_votes_niche": {
-    "description": "小众游戏门槛（打分人数少于该值即视为小众）",
-    "hint": "默认 5。总榜单仍会收录这些游戏，/小众游戏 只单独列出它们。",
+    "description": "小众榜门槛（打分人数少于该值即视为小众）",
+    "hint": "默认 5。总榜单仍会收录这些游戏，/小众榜 只单独列出它们。",
     "type": "int",
     "default": 5
   },
@@ -69,5 +69,11 @@
     "hint": "超出部分只显示「还有 N 条」。",
     "type": "int",
     "default": 6
+  },
+  "board_title_admin_only": {
+    "description": "榜单改名仅限管理员",
+    "hint": "默认关闭，任何群友都能用 /榜名 改本群榜单标题。",
+    "type": "bool",
+    "default": false
   }
 }

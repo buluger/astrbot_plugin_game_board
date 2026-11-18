@@ -459,7 +459,7 @@ class GameBoardPlugin(Star):
 
     # ------------------------------------------------------------------ 指令
 
-    @filter.command("游戏帮助", alias={"gamehelp", "游戏指令"})
+    @filter.command("榜帮助", alias={"游戏帮助", "gamehelp", "游戏指令"})
     async def cmd_help(self, event: AstrMessageEvent):
         """查看插件全部指令"""
         group = self._group(event)
@@ -468,37 +468,40 @@ class GameBoardPlugin(Star):
         total = len(rows)
         niche = sum(1 for r in rows if int(r.get("votes") or 0) < int(self._cfg("min_votes_niche", 5)))
 
+        board_title = await self.db.get_board_title(group) or "游戏推荐榜"
         lines = [
-            "群游戏推荐榜 · 指令一览",
+            f"「{board_title}」· 指令一览",
             "",
-            "/推荐 游戏名 —— 搜索后打 1-10 分上榜，可带一句评论",
-            "/评分 游戏名 分数 [评论] —— 打分或改分，如 /评分 杀戮尖塔 9.5 神作",
-            "/评论 游戏名 —— 只补评论，不打分",
-            "/游戏 游戏名 —— 详情卡，推荐人评论置顶",
+            "/上榜 游戏名 —— 搜索后打 1-10 分上榜，可带一句评论",
+            "/打分 游戏名 分数 [评论] —— 投票或改票，如 /打分 杀戮尖塔 9.5 神作",
+            "/点评 游戏名 —— 只补评论，不打分",
+            "/详情 游戏名 —— 详情卡，推荐人评论置顶",
             "/榜单 [标签...] —— 总榜；带标签则筛选，空格是并集，动作+独立 是交集",
-            "/小众游戏 —— 打分人数不足 5 人的游戏单独成榜",
-            "/撤评 游戏名 —— 撤销自己那一票",
-            "/撤榜 游戏名 —— 从本群移除（推荐人或管理员）",
+            "/小众榜 —— 打分人数不足 5 人的游戏单独成榜",
+            "/贴标签 游戏名 标签... —— 给作品补标签，榜单可按它筛",
+            "/撤分 游戏名 —— 撤销自己那一票",
+            "/下榜 游戏名 —— 从本群移除（推荐人或管理员）",
+            "/榜名 名称 —— 改本群榜单标题；/榜名 重置 恢复默认",
             "",
             "分档：<2 拉完了 · 2-4 NPC · 4-6 人上人 · 6-8 顶级 · ≥8 夯",
-            "英文别名：recommend / rate / comment / game / board / niche / unrate / remove",
+            "英文别名：recommend / rate / comment / game / board / niche / tag / unrate / remove",
             "",
             f"本群现有 {total} 个游戏、{votes} 票"
-            + (f"，其中 {niche} 个是小众游戏" if niche else ""),
-            "上手顺序：/推荐 艾尔登法环 → 发 9.5 神作 → /榜单",
+            + (f"，其中 {niche} 个是小众榜候选" if niche else ""),
+            "上手顺序：/上榜 艾尔登法环 → 发 9.5 神作 → /榜单",
         ]
         if not total:
-            lines.append("（榜单还是空的，先来第一推荐吧）")
+            lines.append("（榜单还是空的，先来第一个上榜游戏吧）")
         yield event.plain_result("\n".join(lines))
 
-    @filter.command("推荐", alias={"recommend"})
+    @filter.command("上榜", alias={"推荐", "recommend"})
     async def cmd_recommend(self, event: AstrMessageEvent):
         """推荐一个游戏并打分上榜"""
         uid, nick = self._sender(event)
         if not self._rate_ok(uid):
             yield event.plain_result("操作太频繁了，缓一缓再来。")
             return
-        term = self._rest(event, ["推荐", "recommend"])
+        term = self._rest(event, ["上榜", "推荐", "recommend"])
         if not term:
             yield event.plain_result("要推荐什么游戏？用法：/推荐 艾尔登法环")
             return
@@ -510,7 +513,7 @@ class GameBoardPlugin(Star):
             yield event.plain_result(
                 f"「{same.get('name_cn') or same['name']}」已经在榜单里了："
                 f"{fmt_score(same.get('avg_score'))} 分 / {same.get('votes', 0)} 人。\n"
-                f"直接 /评分 {same.get('name_cn') or same['name']} 分数 给它打分吧。"
+                f"直接 /打分 {same.get('name_cn') or same['name']} 分数 给它投票吧。"
             )
             return
 
@@ -590,23 +593,23 @@ class GameBoardPlugin(Star):
         yield event.plain_result(
             f"已上榜：《{info.name_cn or info.name}》{fmt_score(score)} 分"
             f"（{'夯' if tier['key'] == 'hang' else tier['label']}）\n"
-            "其他群友可以 /评分 名字 分数 来投票，/榜单 看全群排行。"
+            "其他群友可以 /打分 名字 分数 来投票，/榜单 看全群排行。"
         )
 
-    @filter.command("评分", alias={"rate"})
+    @filter.command("打分", alias={"评分", "rate"})
     async def cmd_rate(self, event: AstrMessageEvent):
         """给已有游戏打分"""
         uid, nick = self._sender(event)
         if not self._rate_ok(uid):
             yield event.plain_result("操作太频繁了，缓一缓再来。")
             return
-        rest = self._rest(event, ["评分", "rate"])
+        rest = self._rest(event, ["打分", "评分", "rate"])
         tokens = rest.split()
         score_index = next(
             (i for i, tok in enumerate(tokens) if parse_score(tok) is not None), -1
         )
         if score_index <= 0:
-            yield event.plain_result("用法：/评分 游戏名 分数 [评论]，例如 /评分 杀戮尖塔 9")
+            yield event.plain_result("用法：/打分 游戏名 分数 [评论]，例如 /打分 杀戮尖塔 9")
             return
         score = parse_score(tokens[score_index])
         name = " ".join(tokens[:score_index]).strip()
@@ -617,7 +620,7 @@ class GameBoardPlugin(Star):
         board = await self.db.board(group)
         game = self._match(board, name)
         if not game:
-            yield event.plain_result(f"榜单里没有「{name}」，先用 /推荐 加进来。")
+            yield event.plain_result(f"榜单里没有「{name}」，先用 /上榜 加进来。")
             return
         old = await self.db.my_rating(group, game["id"], uid)
         avatar = await self._avatar_file(uid)
@@ -636,16 +639,16 @@ class GameBoardPlugin(Star):
             text += "\n评论也记下了。"
         yield event.plain_result(text)
 
-    @filter.command("评论", alias={"comment"})
+    @filter.command("点评", alias={"评论", "comment"})
     async def cmd_comment(self, event: AstrMessageEvent):
         """给游戏补一条评论"""
         uid, nick = self._sender(event)
         if not self._rate_ok(uid):
             yield event.plain_result("操作太频繁了，缓一缓再来。")
             return
-        name = self._rest(event, ["评论", "comment"])
+        name = self._rest(event, ["点评", "评论", "comment"])
         if not name:
-            yield event.plain_result("用法：/评论 游戏名（然后发内容）")
+            yield event.plain_result("用法：/点评 游戏名（然后发内容）")
             return
         group = self._group(event)
         board = await self.db.board(group)
@@ -675,13 +678,13 @@ class GameBoardPlugin(Star):
         await self.db.add_comment(group, game["id"], uid, text, nick, avatar, pinned=pinned)
         yield event.plain_result("评论已记录，/游戏 名字 可以看全部评论。")
 
-    @filter.command("撤评", alias={"unrate"})
+    @filter.command("撤分", alias={"撤评", "unrate"})
     async def cmd_unrate(self, event: AstrMessageEvent):
         """撤销自己的评分"""
         uid, _ = self._sender(event)
-        name = self._rest(event, ["撤评", "unrate"])
+        name = self._rest(event, ["撤分", "撤评", "unrate"])
         if not name:
-            yield event.plain_result("用法：/撤评 游戏名")
+            yield event.plain_result("用法：/撤分 游戏名")
             return
         group = self._group(event)
         board = await self.db.board(group)
@@ -699,13 +702,13 @@ class GameBoardPlugin(Star):
             f"现在 {fmt_score(stats.get('avg_score'))} 分 / {stats.get('votes', 0)} 人。"
         )
 
-    @filter.command("撤榜", alias={"remove"})
+    @filter.command("下榜", alias={"撤榜", "remove"})
     async def cmd_remove(self, event: AstrMessageEvent):
         """移除推荐（推荐人本人或管理员）"""
         uid, _ = self._sender(event)
-        name = self._rest(event, ["撤榜", "remove"])
+        name = self._rest(event, ["下榜", "撤榜", "remove"])
         if not name:
-            yield event.plain_result("用法：/撤榜 游戏名")
+            yield event.plain_result("用法：/下榜 游戏名")
             return
         group = self._group(event)
         board = await self.db.board(group)
@@ -720,6 +723,111 @@ class GameBoardPlugin(Star):
         await self.db.delete_game_from_group(group, game["id"])
         yield event.plain_result(f"已把《{game.get('name_cn') or game['name']}》从本群榜单移除。")
 
+    @filter.command("贴标签", alias={"加标签", "tag"})
+    async def cmd_tag(self, event: AstrMessageEvent):
+        """给作品补充标签（本群生效，可被 /榜单 筛选）"""
+        uid, _ = self._sender(event)
+        if not self._rate_ok(uid):
+            yield event.plain_result("操作太频繁了，缓一缓再来。")
+            return
+        rest = self._rest(event, ["贴标签", "加标签", "tag"])
+        if not rest:
+            yield event.plain_result("用法：/贴标签 游戏名 标签1 标签2，例如 /贴标签 空洞骑士 魂系 手绘")
+            return
+        group = self._group(event)
+        rows = await self.db.board(group)
+        if not rows:
+            yield event.plain_result("本群榜单还是空的，先 /上榜 加个游戏吧。")
+            return
+
+        game, raw_tags = self._split_game_and_tags(rows, rest)
+        if not game:
+            yield event.plain_result(
+                f"没认出「{rest}」是哪个游戏。用法：/贴标签 游戏名 标签1 标签2\n"
+                "名字不确定的话先发 /榜单 看一眼。"
+            )
+            return
+
+        tags = [t for t in re.split(r"[\s,，]+", " ".join(raw_tags)) if t]
+        if not tags:
+            yield event.plain_result(f"要给《{game.get('name_cn') or game['name']}》贴什么标签？例如：/贴标签 名字 魂系 手绘")
+            return
+        if len(tags) > 5:
+            yield event.plain_result("一次最多贴 5 个标签。")
+            return
+
+        existing = await self.db.board(group)
+        current = next((r for r in existing if r["id"] == game["id"]), game)
+        have = [normalize_tag(t) for t in (current.get("custom_tags") or [])]
+        if len(have) >= 15:
+            yield event.plain_result("这个游戏的标签已经够多了，先这样吧。")
+            return
+
+        added: list[str] = []
+        skipped: list[str] = []
+        for tag in tags:
+            tag = tag.strip()[:8]
+            norm = normalize_tag(tag)
+            if not norm:
+                continue
+            if norm in have or norm in [normalize_tag(a) for a in added]:
+                skipped.append(tag)
+                continue
+            ok = await self.db.add_custom_tag(group, game["id"], tag, norm)
+            (added if ok else skipped).append(tag)
+
+        name = game.get("name_cn") or game["name"]
+        parts = []
+        if added:
+            parts.append(f"已给《{name}》贴上：{'、'.join(added)}")
+        if skipped:
+            parts.append(f"这几个已经有了：{'、'.join(skipped)}")
+        if not added and not skipped:
+            parts.append("没贴成功，换个标签试试。")
+        parts.append("/榜单 标签名 可以按标签筛选了。")
+        yield event.plain_result("\n".join(parts))
+
+    @filter.command("榜名", alias={"boardname", "榜单名"})
+    async def cmd_board_title(self, event: AstrMessageEvent):
+        """设置本群榜单的标题"""
+        uid, _ = self._sender(event)
+        if not self._rate_ok(uid):
+            yield event.plain_result("操作太频繁了，缓一缓再来。")
+            return
+        rest = self._rest(event, ["榜名", "boardname", "榜单名"])
+        group = self._group(event)
+        current = await self.db.get_board_title(group)
+
+        if not rest:
+            if current:
+                yield event.plain_result(
+                    f"本群榜单现在叫「{current}」。\n要改就发 /榜名 新名字，要恢复默认发 /榜名 重置。"
+                )
+            else:
+                yield event.plain_result(
+                    "本群榜单还没起名，默认叫「游戏推荐榜」。\n发 /榜名 新名字 就能改。"
+                )
+            return
+
+        if rest in {"重置", "清除", "默认", "reset", "clear"}:
+            await self.db.set_board_title(group, "", uid)
+            yield event.plain_result("榜单名已恢复默认：游戏推荐榜。")
+            return
+
+        if self._cfg("board_title_admin_only", False) and not self._is_admin(event):
+            yield event.plain_result("本群设置只允许管理员改榜单名。")
+            return
+
+        title = " ".join(rest.split())[:20]
+        if not title:
+            yield event.plain_result("名字不能是空的。")
+            return
+        await self.db.set_board_title(group, title, uid)
+        yield event.plain_result(
+            f"本群榜单改名为「{title}」，下次 /榜单 就带这个标题。"
+            "（想恢复默认发 /榜名 重置）"
+        )
+
     @filter.command("榜单", alias={"board"})
     async def cmd_board(self, event: AstrMessageEvent):
         """输出榜单（可带标签筛选）"""
@@ -728,7 +836,7 @@ class GameBoardPlugin(Star):
         rows = await self.db.board(group)
         if not rows:
             yield event.plain_result(
-                "本群还没有推荐过游戏，用 /推荐 游戏名 开个头吧。\n发送 /游戏帮助 可看全部指令。"
+                "本群还没有游戏上榜，用 /上榜 游戏名 开个头吧。\n发送 /游戏帮助 可看全部指令。"
             )
             return
 
@@ -742,9 +850,11 @@ class GameBoardPlugin(Star):
                 return
 
         rows = await self._with_assets(rows)
-        title = "游戏推荐榜"
+        base_title = await self.db.get_board_title(group) or "游戏推荐榜"
+        title = base_title
         if tags_filter:
-            title = "游戏推荐榜 · " + " + ".join(tags_filter) if intersect else "游戏推荐榜 · " + " / ".join(tags_filter)
+            joined = " + ".join(tags_filter) if intersect else " / ".join(tags_filter)
+            title = f"{base_title} · {joined}"
         subtitle = f"按均分排序 · 标签筛选：{rest}" if rest else "按均分排序 · 夯 / 顶级 / 人上人 / NPC / 拉完了"
         path = self._image_path("board")
         try:
@@ -757,7 +867,7 @@ class GameBoardPlugin(Star):
             return
         yield event.image_result(str(path))
 
-    @filter.command("小众游戏", alias={"niche"})
+    @filter.command("小众榜", alias={"小众游戏", "niche"})
     async def cmd_niche(self, event: AstrMessageEvent):
         """打分人数不足的小众游戏"""
         group = self._group(event)
@@ -768,13 +878,14 @@ class GameBoardPlugin(Star):
             yield event.plain_result(f"目前没有打分人数少于 {threshold} 人的游戏。")
             return
         niche = await self._with_assets(niche)
+        base_title = await self.db.get_board_title(group) or "游戏推荐榜"
         path = self._image_path("niche")
         try:
             await asyncio.to_thread(
                 render_board,
                 niche,
                 path,
-                "小众游戏榜",
+                f"{base_title} · 小众榜",
                 f"打分人数 < {threshold} 人 · 共 {len(niche)} 个",
             )
         except Exception as exc:  # noqa: BLE001
@@ -783,18 +894,18 @@ class GameBoardPlugin(Star):
             return
         yield event.image_result(str(path))
 
-    @filter.command("游戏", alias={"game"})
+    @filter.command("详情", alias={"游戏", "game"})
     async def cmd_game(self, event: AstrMessageEvent):
         """查看游戏详情"""
-        name = self._rest(event, ["游戏", "game"])
+        name = self._rest(event, ["详情", "游戏", "game"])
         if not name:
-            yield event.plain_result("用法：/游戏 艾尔登法环")
+            yield event.plain_result("用法：/详情 艾尔登法环")
             return
         group = self._group(event)
         board = await self.db.board(group)
         game = self._match(board, name)
         if not game:
-            yield event.plain_result(f"榜单里没有「{name}」，先用 /推荐 加进来。")
+            yield event.plain_result(f"榜单里没有「{name}」，先用 /上榜 加进来。")
             return
         stats = await self.db.stats(group, game["id"])
         assert stats is not None
@@ -852,6 +963,37 @@ class GameBoardPlugin(Star):
         if intersect:
             return [r for r in rows if all(t in row_tags(r) for t in wanted)]
         return [r for r in rows if any(t in row_tags(r) for t in wanted)]
+
+    def _split_game_and_tags(
+        self, rows: list[dict], rest: str
+    ) -> tuple[dict | None, list[str]]:
+        """从「游戏名 标签1 标签2」里切出游戏。
+
+        名字可能带空格，所以从长到短试，但**只认精确匹配**——
+        用模糊匹配会把「空洞骑士 魂系」整体当成游戏名，把标签吃掉。
+        """
+        tokens = rest.split()
+        for k in range(len(tokens) - 1, 0, -1):
+            query = " ".join(tokens[:k])
+            game = self._exact_match(rows, query)
+            if game:
+                return game, tokens[k:]
+        game = self._match(rows, tokens[0]) if tokens else None
+        if game:
+            return game, tokens[1:]
+        return None, []
+
+    def _exact_match(self, rows: list[dict], query: str) -> dict | None:
+        q = normalize_name(query)
+        if not q:
+            return None
+        for row in rows:
+            if q in {
+                normalize_name(row.get("name") or ""),
+                normalize_name(row.get("name_cn") or ""),
+            }:
+                return row
+        return None
 
     def _match(self, rows: list[dict], query: str) -> dict | None:
         q = normalize_name(query)
