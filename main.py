@@ -41,7 +41,8 @@ AVATAR_URL = "https://q1.qlogo.cn/g?b=qq&nk={uid}&s=100"
 
 COMMAND_NAMES = {
     "推荐", "打分", "点评", "榜单", "榜单详情", "小众游戏榜", "贴标签",
-    "撤分", "撤榜", "榜名", "榜单帮助", "board", "game", "tag", "rate", "recommend",
+    "撤分", "撤榜", "榜名", "榜单帮助", "添加", "manual",
+    "board", "game", "tag", "rate", "recommend",
 }
 
 USAGE = (
@@ -202,46 +203,55 @@ class GameBoardPlugin(Star):
         steam_enabled = bool(self._cfg("enable_steam", True))
         bgm_enabled = bool(self._cfg("enable_bangumi", True))
 
+        steam_hits: list[Candidate] = []
         if steam_enabled:
             try:
-                direct = await self.steam.search(term)
-                if direct:
-                    return direct
+                steam_hits = await self.steam.search(term)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[game_board] Steam 搜索失败：{exc}")
 
-        if not bgm_enabled:
-            return []
+        query_norm = normalize_name(term)
+        exact_steam = any(
+            query_norm
+            in {normalize_name(c.name), normalize_name(c.name_cn)}
+            for c in steam_hits
+        )
+        # Steam 有精确命中就直接用；否则（没搜到 / 只搜到外传和 DLC）补一次 Bangumi，
+        # 否则英雄联盟、魔兽世界这类「Steam 只有衍生作、本体在 Bangumi」的会被漏掉。
+        if exact_steam or not bgm_enabled:
+            return steam_hits
 
         try:
             bgm = await self.bangumi.search(term)
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[game_board] Bangumi 搜索失败：{exc}")
-            return []
+            return steam_hits
 
-        if not bgm:
-            return []
+        merged = list(steam_hits)
+        seen_keys = {(c.source, c.source_id) for c in merged}
+        seen_names = {
+            normalize_name(c.name_cn or c.name) for c in merged
+        } | {normalize_name(c.name) for c in merged}
+        for cand in bgm:
+            norm = normalize_name(cand.name_cn or cand.name)
+            if (cand.source, cand.source_id) in seen_keys or norm in seen_names:
+                continue
+            seen_keys.add((cand.source, cand.source_id))
+            seen_names.add(norm)
+            merged.append(cand)
 
-        if not steam_enabled:
-            return bgm
+        merged.sort(key=lambda c: self._cand_rank(c, query_norm))
+        return merged[:8]
 
-        merged: list[Candidate] = []
-        seen: set[tuple[str, str]] = set()
-        for alt in bgm[:3]:
-            for query in {alt.name, alt.name_cn} - {""}:
-                try:
-                    hits = await self.steam.search(query, limit=3)
-                except Exception:  # noqa: BLE001
-                    continue
-                for hit in hits:
-                    key = (hit.source, hit.source_id)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    if alt.name_cn:
-                        hit.name_cn = alt.name_cn
-                    merged.append(hit)
-        return merged or bgm
+    @staticmethod
+    def _cand_rank(cand: Candidate, query_norm: str) -> int:
+        """名字和用户输入完全一致（或包含）的排前面，其余按来源顺序。"""
+        names = {normalize_name(cand.name), normalize_name(cand.name_cn)}
+        if query_norm and query_norm in names:
+            return 0
+        if query_norm and any(query_norm in n for n in names if n):
+            return 1
+        return 2
 
     async def _fetch_info(self, cand: Candidate) -> GameInfo | None:
         try:
@@ -440,7 +450,7 @@ class GameBoardPlugin(Star):
             await self._reply(sub_event, "没看到图片，重新发一张，或发「跳过」。")
             controller.keep(timeout, reset_timeout=True)
 
-        await self._reply(event, "发一张游戏封面图（60 秒内），或者发「跳过」用占位图：")
+        await self._reply(event, "发一张游戏封面图（2 分钟内），或者发「跳过」用占位图：")
         try:
             await wait_image(event, OwnerSessionFilter(uid))
         except TimeoutError:
@@ -530,6 +540,7 @@ class GameBoardPlugin(Star):
             "/榜单 [标签...] —— 总榜；带标签则筛选，空格是并集，动作+独立 是交集",
             "/小众游戏榜 —— 打分人数不足 5 人的游戏单独成榜",
             "/贴标签 游戏名 标签... —— 给作品补标签，榜单可按它筛",
+            "/添加 游戏名 —— 手动建条目（封面+标签+打分+评论）",
             "/撤分 游戏名 —— 撤销自己那一票",
             "/撤榜 游戏名 —— 从本群移除（推荐人或管理员）",
             "/榜名 名称 —— 改本群榜单标题；/榜名 重置 恢复默认",
@@ -655,20 +666,15 @@ class GameBoardPlugin(Star):
             yield event.plain_result("操作太频繁了，缓一缓再来。")
             return
         rest = self._rest(event, ["打分", "评分", "rate"])
-        tokens = rest.split()
-        score_index = next(
-            (i for i, tok in enumerate(tokens) if parse_score(tok) is not None), -1
-        )
-        if score_index <= 0:
-            yield event.plain_result("用法：/打分 游戏名 分数 [评论]，例如 /打分 杀戮尖塔 9")
-            return
-        score = parse_score(tokens[score_index])
-        name = " ".join(tokens[:score_index]).strip()
-        comment = " ".join(tokens[score_index + 1:]).strip()
-        assert score is not None
-
         group = self._group(event)
         board = await self.db.board(group)
+        name, score, comment = self._parse_rate_args(board, rest)
+        if score is None:
+            yield event.plain_result(
+                "用法：/打分 游戏名 分数 [评论]，例如 /打分 杀戮尖塔 9\n"
+                "名字里带数字时用引号括起来，例如 /打分 \"Left 4 Dead 2\" 10 神作"
+            )
+            return
         game = self._match(board, name)
         if not game:
             yield event.plain_result(f"榜单里没有「{name}」，先用 /推荐 加进来。")
@@ -879,6 +885,56 @@ class GameBoardPlugin(Star):
             "（想恢复默认发 /榜名 重置）"
         )
 
+    @filter.command("添加", alias={"自定义", "自建", "manual"})
+    async def cmd_add(self, event: AstrMessageEvent):
+        """手动建条目：封面 + 标签 + 打分 + 评论，仅本群可见"""
+        uid, nick = self._sender(event)
+        if not self._rate_ok(uid):
+            yield event.plain_result("操作太频繁了，缓一缓再来。")
+            return
+        term = self._rest(event, ["添加", "自定义", "自建", "manual"])
+        if not term:
+            yield event.plain_result(
+                "用法：/添加 游戏名，然后按提示发封面、标签、分数。\n"
+                "适合 Steam 和 Bangumi 都没有收录的游戏。"
+            )
+            return
+        group = self._group(event)
+        board = await self.db.board(group)
+        same = self._match(board, term)
+        if same:
+            yield event.plain_result(
+                f"「{same.get('name_cn') or same['name']}」已经在榜上了，"
+                f"直接 /打分 {same.get('name_cn') or same['name']} 分数 就行。"
+            )
+            return
+        if not self._cfg("allow_manual", True):
+            yield event.plain_result("本插件已关闭手动添加。")
+            return
+
+        game = await self._manual_create(event, term, group, uid)
+        if not game:
+            yield event.plain_result("没建成功，稍后再试。")
+            return
+        await self.db.add_submission(group, game["id"], uid)
+        yield event.plain_result(f"《{term}》的条目建好了（仅本群可见）。给它打个分吧（1-10，可附评论）：")
+
+        score, comment = await self._ask_score(event, term)
+        if score is None:
+            yield event.plain_result("没等到分数，条目先留着，随时 /打分 补上。")
+            return
+        avatar = await self._avatar_file(uid)
+        await self.db.set_rating(group, game["id"], uid, score, nick, avatar)
+        if comment:
+            await self.db.add_comment(
+                group, game["id"], uid, comment, nick, avatar, pinned=True
+            )
+        tier = tier_of(score)
+        yield event.plain_result(
+            f"已上榜：《{term}》{fmt_score(score)} 分（{tier['label']}）\n"
+            "之后别人可以 /打分 名字 分数 来投票。"
+        )
+
     @filter.command("榜单", alias={"board"})
     async def cmd_board(self, event: AstrMessageEvent):
         """输出榜单（可带标签筛选）"""
@@ -1014,6 +1070,47 @@ class GameBoardPlugin(Star):
         if intersect:
             return [r for r in rows if all(t in row_tags(r) for t in wanted)]
         return [r for r in rows if any(t in row_tags(r) for t in wanted)]
+
+    def _parse_rate_args(
+        self, rows: list[dict], rest: str
+    ) -> tuple[str, float | None, str]:
+        """把「游戏名 分数 [评论]」拆开。
+
+        名字里可能带数字（Left 4 Dead 2），所以：
+        1. 先用引号/书名号括起来的名字，最稳；
+        2. 否则在榜单里找「哪个切分点前面的名字是真实存在的游戏」，取最长的那个；
+        3. 都不行再退回「第一个像分数的词」。
+        """
+        text = rest.strip()
+        quoted = re.match(r'^\s*["“\'「《](.+?)["”\'」》]\s*(.*)$', text)
+        if quoted:
+            name = quoted.group(1).strip()
+            tokens = quoted.group(2).split()
+            score = parse_score(tokens[0]) if tokens else None
+            return name, score, " ".join(tokens[1:]).strip()
+
+        tokens = text.split()
+        best: tuple[int, str, float, str] | None = None
+        for i, tok in enumerate(tokens):
+            if i == 0:
+                continue
+            score = parse_score(tok)
+            if score is None:
+                continue
+            name = " ".join(tokens[:i])
+            if self._exact_match(rows, name) and (best is None or i > best[0]):
+                best = (i, name, score, " ".join(tokens[i + 1:]).strip())
+        if best:
+            return best[1], best[2], best[3]
+
+        first = next(
+            ((i, parse_score(tok)) for i, tok in enumerate(tokens) if i > 0 and parse_score(tok)),
+            None,
+        )
+        if not first:
+            return "", None, ""
+        i, score = first
+        return " ".join(tokens[:i]), score, " ".join(tokens[i + 1:]).strip()
 
     def _split_game_and_tags(
         self, rows: list[dict], rest: str
