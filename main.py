@@ -16,7 +16,11 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Image as CompImage, Plain
 from astrbot.api.star import Context, Star, StarTools, register
-from astrbot.core.utils.session_waiter import SessionController, session_waiter
+from astrbot.core.utils.session_waiter import (
+    SessionController,
+    SessionFilter,
+    session_waiter,
+)
 
 from .core.db import GameStore
 from .core.render import render_board, render_detail
@@ -29,9 +33,16 @@ from .core.scoring import (
 )
 from .core.sources import BangumiSource, Candidate, GameInfo, SteamSource, download, safe_filename
 
+WAIT_TIMEOUT = 120  # 需要用户回话的流程，2 分钟没等到就作废
+
 PLUGIN_NAME = "astrbot_plugin_game_board"
 DATA_NAME = "game_board"
 AVATAR_URL = "https://q1.qlogo.cn/g?b=qq&nk={uid}&s=100"
+
+COMMAND_NAMES = {
+    "推荐", "打分", "点评", "榜单", "榜单详情", "小众游戏榜", "贴标签",
+    "撤分", "撤榜", "榜名", "榜单帮助", "board", "game", "tag", "rate", "recommend",
+}
 
 USAGE = (
     "用法：\n"
@@ -46,6 +57,21 @@ USAGE = (
     "/撤榜 游戏名 —— 移除推荐（推荐人/管理员）\n"
     "/榜名 名称 —— 改本群榜单标题"
 )
+
+
+class OwnerSessionFilter(SessionFilter):
+    """把交互会话绑到「触发者」身上。
+
+    默认的 DefaultSessionFilter 只按 unified_msg_origin 区分会话，同一个群里
+    谁回一句都算数——推荐人还没打分，别人发个「1」就被当成分数了。
+    加上发送者 ID 之后，只有发起指令的那个人能推进流程。
+    """
+
+    def __init__(self, user_id: str) -> None:
+        self.user_id = str(user_id or "")
+
+    def filter(self, event: AstrMessageEvent) -> str:
+        return f"{event.unified_msg_origin}:{event.get_sender_id()}"
 
 
 @register(
@@ -151,6 +177,10 @@ class GameBoardPlugin(Star):
             return fname
         ok = await download(AVATAR_URL.format(uid=uid), path)
         return fname if ok else ""
+
+    @staticmethod
+    def _looks_like_command(text: str) -> bool:
+        return text.startswith(("/", "／", "!", "！")) or text.split(" ")[0] in COMMAND_NAMES
 
     @staticmethod
     async def _reply(event: AstrMessageEvent, text: str) -> None:
@@ -286,31 +316,41 @@ class GameBoardPlugin(Star):
     async def _ask_score(
         self, event: AstrMessageEvent, title: str
     ) -> tuple[float | None, str]:
-        """等待用户输入分数（可附评论），90 秒超时。"""
+        """等发起人输入分数（可附评论），2 分钟超时。"""
         umo = event.unified_msg_origin
+        uid, _ = self._sender(event)
         state: dict = {"score": None, "comment": ""}
         self._pending[umo] = state
 
-        @session_waiter(timeout=90)
+        @session_waiter(timeout=WAIT_TIMEOUT)
         async def wait_score(controller: SessionController, sub_event: AstrMessageEvent):
             text = (sub_event.message_str or "").strip()
             if text in {"取消", "cancel", "退出"}:
+                controller.stop()
+                return
+            if self._looks_like_command(text):
+                await self._reply(
+                    sub_event,
+                    "这次填分先取消了（刚发的那条指令没执行，需要的话再发一次）。",
+                )
                 controller.stop()
                 return
             tokens = text.split(maxsplit=1)
             score = parse_score(tokens[0]) if tokens else None
             if score is None:
                 await self._reply(
-                    sub_event, "要 1-10 之间的分数，例如 8 或 9.5（可附一句评论）"
+                    sub_event,
+                    "直接回一个 1-10 的分数，比如 8 或 9.5（后面可以跟一句评论）；"
+                    "发「取消」放弃。",
                 )
-                controller.keep(90, reset_timeout=True)
+                controller.keep(WAIT_TIMEOUT, reset_timeout=True)
                 return
             state["score"] = score
             state["comment"] = tokens[1].strip() if len(tokens) > 1 else ""
             controller.stop()
 
         try:
-            await wait_score(event)
+            await wait_score(event, OwnerSessionFilter(uid))
         except TimeoutError:
             return None, ""
         finally:
@@ -318,27 +358,32 @@ class GameBoardPlugin(Star):
         return state["score"], state["comment"]
 
     async def _ask_comment(self, event: AstrMessageEvent) -> str:
-        @session_waiter(timeout=90)
+        uid, _ = self._sender(event)
+
+        @session_waiter(timeout=WAIT_TIMEOUT)
         async def wait_comment(controller: SessionController, sub_event: AstrMessageEvent):
             text = (sub_event.message_str or "").strip()
             if text in {"取消", "cancel", "退出"}:
                 controller.stop()
                 return
             if not text:
-                controller.keep(90, reset_timeout=True)
+                controller.keep(WAIT_TIMEOUT, reset_timeout=True)
                 return
             self._pending[event.unified_msg_origin] = {"comment": text}
             controller.stop()
 
         try:
-            await wait_comment(event)
+            await wait_comment(event, OwnerSessionFilter(uid))
         except TimeoutError:
             return ""
         return (self._pending.pop(event.unified_msg_origin, {}) or {}).get("comment", "")
 
-    async def _ask_text(self, event: AstrMessageEvent, prompt: str, timeout: int = 90) -> str:
-        """发一条提示，等用户回文本。"""
+    async def _ask_text(
+        self, event: AstrMessageEvent, prompt: str, timeout: int = WAIT_TIMEOUT
+    ) -> str:
+        """发一条提示，等发起人回文本。"""
         umo = event.unified_msg_origin
+        uid, _ = self._sender(event)
         box: dict = {"text": ""}
 
         @session_waiter(timeout=timeout)
@@ -355,15 +400,18 @@ class GameBoardPlugin(Star):
 
         await self._reply(event, prompt)
         try:
-            await wait_text(event)
+            await wait_text(event, OwnerSessionFilter(uid))
         except TimeoutError:
             return ""
         finally:
             self._pending.pop(umo, None)
         return box["text"]
 
-    async def _ask_image(self, event: AstrMessageEvent, timeout: int = 90) -> Path | None:
-        """等用户发一张封面图；发「跳过」返回 None。"""
+    async def _ask_image(
+        self, event: AstrMessageEvent, timeout: int = WAIT_TIMEOUT
+    ) -> Path | None:
+        """等发起人发一张封面图；发「跳过」返回 None。"""
+        uid, _ = self._sender(event)
         state: dict = {"path": None}
 
         @session_waiter(timeout=timeout)
@@ -394,7 +442,7 @@ class GameBoardPlugin(Star):
 
         await self._reply(event, "发一张游戏封面图（60 秒内），或者发「跳过」用占位图：")
         try:
-            await wait_image(event)
+            await wait_image(event, OwnerSessionFilter(uid))
         except TimeoutError:
             return None
         return state["path"]
@@ -435,9 +483,10 @@ class GameBoardPlugin(Star):
         ]
         yield_msg = "\n".join(lines)
         state: dict = {"pick": 0}
+        uid, _ = self._sender(event)
         self._pending[event.unified_msg_origin] = state
 
-        @session_waiter(timeout=90)
+        @session_waiter(timeout=WAIT_TIMEOUT)
         async def wait_pick(controller: SessionController, sub_event: AstrMessageEvent):
             text = (sub_event.message_str or "").strip()
             if text in {"0", "取消", "cancel"}:
@@ -445,14 +494,14 @@ class GameBoardPlugin(Star):
                 return
             if not text.isdigit() or not (1 <= int(text) <= len(candidates)):
                 await self._reply(sub_event, f"回 1-{len(candidates)} 的数字选，0 取消")
-                controller.keep(90, reset_timeout=True)
+                controller.keep(WAIT_TIMEOUT, reset_timeout=True)
                 return
             state["pick"] = int(text)
             controller.stop()
 
         await self._reply(event, f"找到这些，回数字选一个：\n{yield_msg}")
         try:
-            await wait_pick(event)
+            await wait_pick(event, OwnerSessionFilter(uid))
         except TimeoutError:
             return None
         self._pending.pop(event.unified_msg_origin, None)
