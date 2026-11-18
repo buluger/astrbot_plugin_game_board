@@ -377,16 +377,34 @@ def render_detail(
         fill=tier["fg"],
     )
 
-    # 标签胶囊
-    tags = list(dict.fromkeys((game.get("tags") or []) + (game.get("custom_tags") or [])))[:6]
+    # 标签胶囊：自动抓的用描边款，群友后来补的用实心高亮款
+    custom_tags = list(dict.fromkeys(game.get("custom_tags") or []))
+    auto_tags = [t for t in (game.get("tags") or []) if t not in custom_tags]
+    pills: list[tuple[str, bool]] = [(t, True) for t in custom_tags[:3]]
+    for tag in auto_tags:
+        if len(pills) >= 6:
+            break
+        pills.append((tag, False))
     tx = margin
     ty = y + 78
-    for tag in tags:
+    for tag, is_custom in pills:
         tw = text_width(draw, tag, font(17)) + 24
         if tx + tw > width - margin:
             break
-        draw.rounded_rectangle([tx, ty, tx + tw, ty + 30], radius=15, fill=DETAIL_PANEL)
-        draw.text((tx + 12, ty + 5), tag, font=font(17), fill=DETAIL_ACCENT)
+        if is_custom:
+            draw.rounded_rectangle(
+                [tx, ty, tx + tw, ty + 30], radius=15, fill=DETAIL_ACCENT
+            )
+            draw.text((tx + 12, ty + 5), tag, font=font(17), fill="#0F2A3D")
+        else:
+            draw.rounded_rectangle(
+                [tx, ty, tx + tw, ty + 30],
+                radius=15,
+                fill=DETAIL_PANEL,
+                outline=DETAIL_ACCENT,
+                width=1,
+            )
+            draw.text((tx + 12, ty + 5), tag, font=font(17), fill=DETAIL_ACCENT)
         tx += tw + 10
     y += title_h
 
