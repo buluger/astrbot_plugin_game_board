@@ -13,8 +13,8 @@ import time
 from pathlib import Path
 
 from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.message_components import Image as CompImage
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.message_components import Image as CompImage, Plain
 from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
@@ -107,12 +107,17 @@ class GameBoardPlugin(Star):
         return str(gid)
 
     def _rest(self, event: AstrMessageEvent, names: list[str]) -> str:
+        """取指令后面的参数。
+
+        兼容：带 / ! 前缀、被 @ 提前、以及消息里只有指令没有参数的情况。
+        """
         text = (getattr(event, "message_str", "") or "").strip()
-        for name in names:
-            for prefix in ("/", "／", "!", "！", ""):
-                token = prefix + name
-                if text.startswith(token):
-                    return text[len(token):].strip()
+        wanted = {n for n in names}
+        tokens = text.split()
+        for i, token in enumerate(tokens[:3]):
+            bare = token.lstrip("/／!！").strip()
+            if bare in wanted:
+                return " ".join(tokens[i + 1:]).strip()
         parts = text.split(maxsplit=1)
         return parts[1].strip() if len(parts) > 1 else ""
 
@@ -144,6 +149,11 @@ class GameBoardPlugin(Star):
             return fname
         ok = await download(AVATAR_URL.format(uid=uid), path)
         return fname if ok else ""
+
+    @staticmethod
+    async def _reply(event: AstrMessageEvent, text: str) -> None:
+        """在 session_waiter 里没法 yield，只能直接发。"""
+        await event.send(MessageChain([Plain(text)]))
 
     def _image_path(self, name: str) -> Path:
         return self.image_dir / f"{safe_filename(name)}_{int(time.time() * 1000)}.png"
@@ -288,8 +298,8 @@ class GameBoardPlugin(Star):
             tokens = text.split(maxsplit=1)
             score = parse_score(tokens[0]) if tokens else None
             if score is None:
-                await sub_event.send(
-                    sub_event.plain_result("要 1-10 之间的分数，例如 8 或 9.5（可附一句评论）")
+                await self._reply(
+                    sub_event, "要 1-10 之间的分数，例如 8 或 9.5（可附一句评论）"
                 )
                 controller.keep(90, reset_timeout=True)
                 return
@@ -341,7 +351,7 @@ class GameBoardPlugin(Star):
             box["text"] = text
             controller.stop()
 
-        await event.send(event.plain_result(prompt))
+        await self._reply(event, prompt)
         try:
             await wait_text(event)
         except TimeoutError:
@@ -377,12 +387,10 @@ class GameBoardPlugin(Star):
                         state["path"] = dest
                 controller.stop()
                 return
-            await sub_event.send(sub_event.plain_result("没看到图片，重新发一张，或发「跳过」。"))
+            await self._reply(sub_event, "没看到图片，重新发一张，或发「跳过」。")
             controller.keep(timeout, reset_timeout=True)
 
-        await event.send(
-            event.plain_result("发一张游戏封面图（60 秒内），或者发「跳过」用占位图：")
-        )
+        await self._reply(event, "发一张游戏封面图（60 秒内），或者发「跳过」用占位图：")
         try:
             await wait_image(event)
         except TimeoutError:
@@ -434,15 +442,13 @@ class GameBoardPlugin(Star):
                 controller.stop()
                 return
             if not text.isdigit() or not (1 <= int(text) <= len(candidates)):
-                await sub_event.send(
-                    sub_event.plain_result(f"回 1-{len(candidates)} 的数字选，0 取消")
-                )
+                await self._reply(sub_event, f"回 1-{len(candidates)} 的数字选，0 取消")
                 controller.keep(90, reset_timeout=True)
                 return
             state["pick"] = int(text)
             controller.stop()
 
-        await event.send(event.plain_result(f"找到这些，回数字选一个：\n{yield_msg}"))
+        await self._reply(event, f"找到这些，回数字选一个：\n{yield_msg}")
         try:
             await wait_pick(event)
         except TimeoutError:
@@ -623,10 +629,9 @@ class GameBoardPlugin(Star):
             yield event.plain_result(f"你在《{game.get('name_cn') or game['name']}》下已经评论 {count} 条了，够啦。")
             return
 
-        await event.send(
-            event.plain_result(
-                f"想对《{game.get('name_cn') or game['name']}》说点什么？直接发内容（{max_len} 字内）："
-            )
+        await self._reply(
+            event,
+            f"想对《{game.get('name_cn') or game['name']}》说点什么？直接发内容（{max_len} 字内）：",
         )
         text = await self._ask_comment(event)
         if not text:
