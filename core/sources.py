@@ -47,6 +47,12 @@ async def _get_json(session: aiohttp.ClientSession, url: str, **kwargs):
         return await resp.json(content_type=None)
 
 
+async def _get_text(session: aiohttp.ClientSession, url: str, **kwargs) -> str:
+    async with session.get(url, **kwargs) as resp:
+        resp.raise_for_status()
+        return await resp.text(errors="ignore")
+
+
 class SteamSource:
     name = "steam"
     _SEARCH = "https://store.steampowered.com/api/storesearch/"
@@ -75,6 +81,28 @@ class SteamSource:
             )
         return out
 
+    async def user_tags(self, appid: str, limit: int = 8) -> list[str]:
+        """抓商店页的「热门用户自定义标签」。
+
+        appdetails 接口只给 genres / categories（单人、多人、动作这类），
+        真正的玩家标签在商店页 HTML 的 app_tag 里，对游戏分类准得多。
+        """
+        url = f"https://store.steampowered.com/app/{appid}/"
+        params = {"l": self.language, "cc": self.country}
+        try:
+            async with aiohttp.ClientSession(timeout=TIMEOUT, headers={"User-Agent": UA}) as s:
+                html = await _get_text(s, url, params=params)
+        except Exception:
+            return []
+        raw = re.findall(r'class="app_tag"[^>]*>\s*([^<]+?)\s*</a>', html)
+        out: list[str] = []
+        for tag in raw:
+            tag = tag.strip()
+            if not tag or tag in {"+", "-"} or tag in out:
+                continue
+            out.append(tag)
+        return out[:limit]
+
     async def detail(self, appid: str) -> GameInfo | None:
         params = {"appids": appid, "l": self.language, "cc": self.country}
         async with aiohttp.ClientSession(timeout=TIMEOUT, headers={"User-Agent": UA}) as s:
@@ -83,8 +111,11 @@ class SteamSource:
         if not payload.get("success"):
             return None
         d = payload["data"]
-        tags = [g.get("description", "") for g in d.get("genres", [])]
-        tags += [c.get("description", "") for c in d.get("categories", [])][:3]
+        tags = await self.user_tags(appid)
+        if not tags:
+            # 锁区 / 年龄验证页拿不到标签时，退回 genres + categories
+            tags = [g.get("description", "") for g in d.get("genres", [])]
+            tags += [c.get("description", "") for c in d.get("categories", [])][:3]
         cdn = "https://cdn.akamai.steamstatic.com/steam/apps"
         header_fallback = d.get("header_image", "") or ""
         return GameInfo(
@@ -133,7 +164,7 @@ class BangumiSource:
             data = await _get_json(s, f"{self._SUBJECT}{subject_id}")
         if not data:
             return None
-        tags = [t.get("name", "") for t in (data.get("tags") or [])][:6]
+        tags = [t.get("name", "") for t in (data.get("tags") or [])][:8]
         images = data.get("images") or {}
         return GameInfo(
             source=self.name,

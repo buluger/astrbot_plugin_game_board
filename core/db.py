@@ -397,6 +397,13 @@ class GameStore:
 
     # ---------- 群设置 ----------
 
+    async def update_tags(self, game_id: int, tags: list[str]) -> None:
+        """只更新游戏库里的标签，群自定义标签在另一张表，不受影响。"""
+        await self.execute(
+            "UPDATE games SET tags = ? WHERE id = ?",
+            (json.dumps(tags, ensure_ascii=False), game_id),
+        )
+
     async def get_board_title(self, group_id: str) -> str:
         rows = await self.query(
             "SELECT board_title FROM group_settings WHERE group_id = ?", (group_id,)

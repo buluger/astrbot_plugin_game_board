@@ -382,7 +382,7 @@ def render_detail(
     auto_tags = [t for t in (game.get("tags") or []) if t not in custom_tags]
     pills: list[tuple[str, bool]] = [(t, True) for t in custom_tags[:3]]
     for tag in auto_tags:
-        if len(pills) >= 6:
+        if len(pills) >= 8:
             break
         pills.append((tag, False))
     tx = margin
