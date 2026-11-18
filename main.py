@@ -48,7 +48,7 @@ COMMAND_NAMES = {
 USAGE = (
     "用法：\n"
     "/推荐 游戏名 —— 推荐游戏并打分\n"
-    "/打分 游戏名 分数 [评论] —— 打分（1-10，可带 .5）\n"
+    "/打分 游戏名 分数 [评论] —— 打分（0-10，可带 .5）\n"
     "/点评 游戏名 —— 给游戏补一条评论\n"
     "/榜单详情 游戏名 —— 看详情\n"
     "/榜单 [标签...] —— 看总榜 / 按标签看\n"
@@ -350,7 +350,7 @@ class GameBoardPlugin(Star):
             if score is None:
                 await self._reply(
                     sub_event,
-                    "直接回一个 1-10 的分数，比如 8 或 9.5（后面可以跟一句评论）；"
+                    "直接回一个 0-10 的分数，比如 8 或 9.5（后面可以跟一句评论）；"
                     "发「取消」放弃。",
                 )
                 controller.keep(WAIT_TIMEOUT, reset_timeout=True)
@@ -533,7 +533,7 @@ class GameBoardPlugin(Star):
         lines = [
             f"「{board_title}」· 指令一览",
             "",
-            "/推荐 游戏名 —— 搜索后打 1-10 分上榜，可带一句评论",
+            "/推荐 游戏名 —— 搜索后打 0-10 分上榜，可带一句评论",
             "/打分 游戏名 分数 [评论] —— 投票或改票，如 /打分 杀戮尖塔 9.5 神作",
             "/点评 游戏名 —— 只补评论，不打分",
             "/榜单详情 游戏名 —— 详情卡，推荐人评论置顶",
@@ -545,7 +545,7 @@ class GameBoardPlugin(Star):
             "/撤榜 游戏名 —— 从本群移除（推荐人或管理员）",
             "/榜名 名称 —— 改本群榜单标题；/榜名 重置 恢复默认",
             "",
-            "分档：<2 拉完了 · 2-4 NPC · 4-6 人上人 · 6-8 顶级 · ≥8 夯",
+            "分档：0-1 屎 · 2-4 拉完了 · 5-6 NPC · 6-7 人上人 · 7-9 顶级 · 9-10 夯",
             "英文别名：recommend / rate / comment / game / board / niche / tag / unrate / remove",
             "",
             f"本群现有 {total} 个游戏、{votes} 票"
@@ -599,7 +599,7 @@ class GameBoardPlugin(Star):
                 return
             await self.db.add_submission(group, manual_game["id"], uid)
             yield event.plain_result(
-                f"《{term}》已手动加入（仅本群可见）。给它打个分吧（1-10，可附评论）："
+                f"《{term}》已手动加入（仅本群可见）。给它打个分吧（0-10，可附评论）："
             )
             score, comment = await self._ask_score(event, term)
             if score is None:
@@ -638,7 +638,7 @@ class GameBoardPlugin(Star):
         yield event.plain_result(
             f"《{info.name_cn or info.name}》已加入候选，"
             f"标签：{'、'.join(info.tags[:4]) or '无'}。\n"
-            "给它打个分吧（1-10，可带评论，例如「9.5 这几年最好的魂游」）："
+            "给它打个分吧（0-10，可带评论，例如「9.5 这几年最好的魂游」）："
         )
         score, comment = await self._ask_score(event, info.name_cn or info.name)
         if score is None:
@@ -917,7 +917,7 @@ class GameBoardPlugin(Star):
             yield event.plain_result("没建成功，稍后再试。")
             return
         await self.db.add_submission(group, game["id"], uid)
-        yield event.plain_result(f"《{term}》的条目建好了（仅本群可见）。给它打个分吧（1-10，可附评论）：")
+        yield event.plain_result(f"《{term}》的条目建好了（仅本群可见）。给它打个分吧（0-10，可附评论）：")
 
         score, comment = await self._ask_score(event, term)
         if score is None:
@@ -962,7 +962,7 @@ class GameBoardPlugin(Star):
         if tags_filter:
             joined = " + ".join(tags_filter) if intersect else " / ".join(tags_filter)
             title = f"{base_title} · {joined}"
-        subtitle = f"按均分排序 · 标签筛选：{rest}" if rest else "按均分排序 · 夯 / 顶级 / 人上人 / NPC / 拉完了"
+        subtitle = f"按均分排序 · 标签筛选：{rest}" if rest else "按均分排序 · 夯 / 顶级 / 人上人 / NPC / 拉完了 / 屎"
         path = self._image_path("board")
         try:
             await asyncio.to_thread(
@@ -1106,7 +1106,11 @@ class GameBoardPlugin(Star):
             return best[1], best[2], best[3]
 
         first = next(
-            ((i, parse_score(tok)) for i, tok in enumerate(tokens) if i > 0 and parse_score(tok)),
+            (
+                (i, parsed)
+                for i, tok in enumerate(tokens)
+                if i > 0 and (parsed := parse_score(tok)) is not None
+            ),
             None,
         )
         if not first:

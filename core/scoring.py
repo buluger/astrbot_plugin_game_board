@@ -10,14 +10,15 @@ import unicodedata
 
 # 展示顺序：从高到低（与参考图一致）
 TIERS: list[dict] = [
-    {"key": "hang", "label": "夯", "min": 8.0, "max": 10.01, "bg": "#B33A27", "fg": "#FFFFFF"},
-    {"key": "ding", "label": "顶级", "min": 6.0, "max": 8.0, "bg": "#D68A2E", "fg": "#FFFFFF"},
-    {"key": "ren", "label": "人上人", "min": 4.0, "max": 6.0, "bg": "#F0D050", "fg": "#2B2B2B"},
-    {"key": "npc", "label": "NPC", "min": 2.0, "max": 4.0, "bg": "#F6E79A", "fg": "#2B2B2B"},
-    {"key": "la", "label": "拉完了", "min": 0.0, "max": 2.0, "bg": "#FFFFFF", "fg": "#2B2B2B"},
+    {"key": "hang", "label": "夯", "min": 9.0, "max": 10.01, "bg": "#B33A27", "fg": "#FFFFFF"},
+    {"key": "ding", "label": "顶级", "min": 7.0, "max": 9.0, "bg": "#D68A2E", "fg": "#FFFFFF"},
+    {"key": "ren", "label": "人上人", "min": 6.0, "max": 7.0, "bg": "#F0D050", "fg": "#2B2B2B"},
+    {"key": "npc", "label": "NPC", "min": 5.0, "max": 6.0, "bg": "#F6E79A", "fg": "#2B2B2B"},
+    {"key": "la", "label": "拉完了", "min": 2.0, "max": 5.0, "bg": "#FFFFFF", "fg": "#2B2B2B"},
+    {"key": "shi", "label": "屎", "min": 0.0, "max": 2.0, "bg": "#6B4B3E", "fg": "#FFFFFF"},
 ]
 
-SCORE_MIN = 1.0
+SCORE_MIN = 0.0
 SCORE_MAX = 10.0
 
 # 标签别名：键统一小写，值统一为 Steam 中文 genre 名或英文规范名
@@ -48,16 +49,17 @@ TAG_ALIASES: dict[str, str] = {
 
 
 def tier_of(score: float | None) -> dict:
-    """按绝对阈值 2/4/6/8 把均分映射到五档。
+    """按绝对阈值 2/5/6/7/9 把均分映射到六档。
 
-    <2 拉完了 / 2-4 NPC / 4-6 人上人 / 6-8 顶级 / >=8 夯（8 分整算夯）
+    0-1 屎 / 2-4 拉完了 / 5-6 NPC / 6-7 人上人 / 7-9 顶级 / 9-10 夯
+    （区间按下限归属：1.5 算屎，4.5 算拉完了，9.0 起算夯）
     """
     if score is None:
         return TIERS[-1]
     for tier in TIERS:
         if tier["min"] <= score < tier["max"]:
             return tier
-    return TIERS[0] if score >= 8 else TIERS[-1]
+    return TIERS[0] if score >= 9 else TIERS[-1]
 
 
 def parse_score(text: str) -> float | None:
