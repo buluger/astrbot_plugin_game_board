@@ -459,6 +459,38 @@ class GameBoardPlugin(Star):
 
     # ------------------------------------------------------------------ 指令
 
+    @filter.command("游戏帮助", alias={"gamehelp", "游戏指令"})
+    async def cmd_help(self, event: AstrMessageEvent):
+        """查看插件全部指令"""
+        group = self._group(event)
+        rows = await self.db.board(group)
+        votes = sum(int(r.get("votes") or 0) for r in rows)
+        total = len(rows)
+        niche = sum(1 for r in rows if int(r.get("votes") or 0) < int(self._cfg("min_votes_niche", 5)))
+
+        lines = [
+            "群游戏推荐榜 · 指令一览",
+            "",
+            "/推荐 游戏名 —— 搜索后打 1-10 分上榜，可带一句评论",
+            "/评分 游戏名 分数 [评论] —— 打分或改分，如 /评分 杀戮尖塔 9.5 神作",
+            "/评论 游戏名 —— 只补评论，不打分",
+            "/游戏 游戏名 —— 详情卡，推荐人评论置顶",
+            "/榜单 [标签...] —— 总榜；带标签则筛选，空格是并集，动作+独立 是交集",
+            "/小众游戏 —— 打分人数不足 5 人的游戏单独成榜",
+            "/撤评 游戏名 —— 撤销自己那一票",
+            "/撤榜 游戏名 —— 从本群移除（推荐人或管理员）",
+            "",
+            "分档：<2 拉完了 · 2-4 NPC · 4-6 人上人 · 6-8 顶级 · ≥8 夯",
+            "英文别名：recommend / rate / comment / game / board / niche / unrate / remove",
+            "",
+            f"本群现有 {total} 个游戏、{votes} 票"
+            + (f"，其中 {niche} 个是小众游戏" if niche else ""),
+            "上手顺序：/推荐 艾尔登法环 → 发 9.5 神作 → /榜单",
+        ]
+        if not total:
+            lines.append("（榜单还是空的，先来第一推荐吧）")
+        yield event.plain_result("\n".join(lines))
+
     @filter.command("推荐", alias={"recommend"})
     async def cmd_recommend(self, event: AstrMessageEvent):
         """推荐一个游戏并打分上榜"""
@@ -558,7 +590,7 @@ class GameBoardPlugin(Star):
         yield event.plain_result(
             f"已上榜：《{info.name_cn or info.name}》{fmt_score(score)} 分"
             f"（{'夯' if tier['key'] == 'hang' else tier['label']}）\n"
-            "其他群友可以 /评分 名字 分数 来投票。"
+            "其他群友可以 /评分 名字 分数 来投票，/榜单 看全群排行。"
         )
 
     @filter.command("评分", alias={"rate"})
@@ -695,7 +727,9 @@ class GameBoardPlugin(Star):
         group = self._group(event)
         rows = await self.db.board(group)
         if not rows:
-            yield event.plain_result("本群还没有推荐过游戏，用 /推荐 游戏名 开个头吧。")
+            yield event.plain_result(
+                "本群还没有推荐过游戏，用 /推荐 游戏名 开个头吧。\n发送 /游戏帮助 可看全部指令。"
+            )
             return
 
         tags_filter, intersect = self._parse_tag_query(rest)
