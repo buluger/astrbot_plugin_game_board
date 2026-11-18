@@ -325,6 +325,13 @@ class GameStore:
         )
         return True
 
+    async def ratings_list(self, group_id: str, game_id: int) -> list[dict]:
+        return await self.query(
+            "SELECT * FROM ratings WHERE group_id = ? AND game_id = ? "
+            "ORDER BY score DESC, updated_at ASC",
+            (group_id, game_id),
+        )
+
     async def my_rating(self, group_id: str, game_id: int, user_id: str) -> float | None:
         rows = await self.query(
             "SELECT score FROM ratings WHERE group_id=? AND game_id=? AND user_id=?",

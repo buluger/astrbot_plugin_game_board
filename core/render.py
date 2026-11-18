@@ -122,6 +122,16 @@ def crop_to_ratio(img: Image.Image, w: int, h: int) -> Image.Image:
     return img.resize((w, h), Image.LANCZOS)
 
 
+def ellipsize(draw: ImageDraw.ImageDraw, text: str, fnt: ImageFont.FreeTypeFont, max_w: int) -> str:
+    """按像素宽度截断，超出补省略号。"""
+    if text_width(draw, text, fnt) <= max_w:
+        return text
+    out = text
+    while out and text_width(draw, out + "…", fnt) > max_w:
+        out = out[:-1]
+    return out + "…" if out else "…"
+
+
 def circle_avatar(path: str, size: int, label: str = "") -> Image.Image:
     """圆形头像；没有图就画一个纯色圆 + 昵称首字。"""
     mask = Image.new("L", (size * 4, size * 4), 0)
@@ -271,6 +281,8 @@ def render_detail(
     max_comments: int = 6,
     pin_recommender: bool = True,
     avatar_dir: Path | None = None,
+    ratings: list[dict] | None = None,
+    max_ratings: int = 12,
 ) -> Path:
     width = 900
     margin = 36
@@ -296,12 +308,27 @@ def render_detail(
         block_h = 46 + 24 * len(text_lines) + 16
         comment_blocks.append((c, block_h, text_lines))
 
+    all_ratings = sorted(
+        ratings or [], key=lambda r: (-float(r.get("score") or 0), r.get("updated_at", 0))
+    )
+    shown_ratings = all_ratings[:max_ratings]
+    rating_remain = max(0, len(all_ratings) - len(shown_ratings))
+    ratings_title_h = 64 if shown_ratings else 0
+    ratings_h = (
+        40 * len(shown_ratings) + (26 if rating_remain else 0) + 18
+        if shown_ratings
+        else 0
+    )
+
     header_h = 300
     title_h = 126
     desc_h = 30 + 26 * len(desc_lines) + 24
     comment_title_h = 56
     comments_h = sum(b[1] for b in comment_blocks) + (34 if remain else 0) + 20
-    total_h = header_h + title_h + desc_h + comment_title_h + comments_h + 24
+    total_h = (
+        header_h + title_h + desc_h + comment_title_h + comments_h
+        + ratings_title_h + ratings_h + 24
+    )
 
     img = Image.new("RGB", (width, total_h), DETAIL_BG)
     draw = ImageDraw.Draw(img)
@@ -420,7 +447,71 @@ def render_detail(
         y += block_h
 
     if remain:
-        draw.text((margin, y), f"还有 {remain} 条评论，发 /游戏 名字 可随时再看", font=font(16), fill="#8FACC2")
+        draw.text(
+            (margin, y),
+            f"还有 {remain} 条评论，发 /榜单详情 名字 可随时再看",
+            font=font(16),
+            fill="#8FACC2",
+        )
+        y += 34
+
+    # 群友打分（分数条形图，从高到低）
+    if shown_ratings:
+        y += 14
+        draw.line([(margin, y), (width - margin, y)], fill="#2F4559", width=1)
+        y += 16
+        draw.text(
+            (margin, y), f"群友打分（{len(all_ratings)}）", font=font(22), fill="#FFFFFF"
+        )
+        y += 40
+
+        avatar_size = 32
+        name_w = 168
+        bar_x = margin + avatar_size + 12 + name_w
+        score_col_w = 56
+        bar_w = width - margin - score_col_w - 16 - bar_x
+        for r in shown_ratings:
+            score_value = float(r.get("score") or 0)
+            tier = tier_of(score_value)
+            name = r.get("nickname") or str(r.get("user_id") or "群友")
+            face = None
+            if avatar_dir and r.get("avatar"):
+                face = str(Path(avatar_dir) / r["avatar"])
+            img.paste(circle_avatar(face or "", avatar_size, name), (margin, y + 4))
+
+            label = ellipsize(draw, name, font(18), name_w)
+            draw.text(
+                (margin + avatar_size + 12, y + 8), label, font=font(18), fill=DETAIL_TEXT
+            )
+
+            track_y = y + 15
+            draw.rounded_rectangle(
+                [bar_x, track_y, bar_x + bar_w, track_y + 12], radius=6, fill=DETAIL_PANEL
+            )
+            fill_w = max(6, int(bar_w * min(score_value, 10.0) / 10.0))
+            fill_color = "#C7D5E0" if tier["bg"] == "#FFFFFF" else tier["bg"]
+            draw.rounded_rectangle(
+                [bar_x, track_y, bar_x + fill_w, track_y + 12], radius=6, fill=fill_color
+            )
+
+            score_label = fmt_score(score_value)
+            draw.text(
+                (width - margin - text_width(draw, score_label, font(19)), y + 7),
+                score_label,
+                font=font(19),
+                fill="#FFFFFF",
+            )
+            y += 40
+
+        if rating_remain:
+            draw.text(
+                (margin, y),
+                f"还有 {rating_remain} 位群友打过分数",
+                font=font(16),
+                fill="#8FACC2",
+            )
+            y += 26
+        y += 18
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path, "PNG", optimize=True)

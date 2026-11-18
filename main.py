@@ -1018,6 +1018,7 @@ class GameBoardPlugin(Star):
         assert stats is not None
         stats = await self._ensure_assets(stats)
         comments = await self.db.comments(group, game["id"])
+        ratings = await self.db.ratings_list(group, game["id"])
         path = self._image_path("detail")
         try:
             await asyncio.to_thread(
@@ -1028,6 +1029,7 @@ class GameBoardPlugin(Star):
                 max_comments=int(self._cfg("detail_max_comments", 6)),
                 pin_recommender=bool(self._cfg("pin_recommender_comment", True)),
                 avatar_dir=self.avatar_dir,
+                ratings=ratings,
             )
         except Exception as exc:  # noqa: BLE001
             logger.error(f"[game_board] 渲染详情失败：{exc}")
