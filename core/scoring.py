@@ -14,8 +14,8 @@ TIERS: list[dict] = [
     {"key": "ding", "label": "顶级", "min": 7.0, "max": 9.0, "bg": "#D68A2E", "fg": "#FFFFFF"},
     {"key": "ren", "label": "人上人", "min": 6.0, "max": 7.0, "bg": "#F0D050", "fg": "#2B2B2B"},
     {"key": "npc", "label": "NPC", "min": 5.0, "max": 6.0, "bg": "#F6E79A", "fg": "#2B2B2B"},
-    {"key": "la", "label": "拉完了", "min": 2.0, "max": 5.0, "bg": "#FFFFFF", "fg": "#2B2B2B"},
-    {"key": "shi", "label": "屎", "min": 0.0, "max": 2.0, "bg": "#6B4B3E", "fg": "#FFFFFF"},
+    {"key": "la", "label": "拉完了", "min": 1.0, "max": 5.0, "bg": "#FFFFFF", "fg": "#2B2B2B"},
+    {"key": "shi", "label": "屎", "min": 0.0, "max": 1.0, "bg": "#6B4B3E", "fg": "#FFFFFF"},
 ]
 
 SCORE_MIN = 0.0
@@ -49,10 +49,10 @@ TAG_ALIASES: dict[str, str] = {
 
 
 def tier_of(score: float | None) -> dict:
-    """按绝对阈值 2/5/6/7/9 把均分映射到六档。
+    """按绝对阈值 1/5/6/7/9 把均分映射到六档。
 
-    0-1 屎 / 2-4 拉完了 / 5-6 NPC / 6-7 人上人 / 7-9 顶级 / 9-10 夯
-    （区间按下限归属：1.5 算屎，4.5 算拉完了，9.0 起算夯）
+    0 屎 / 1-5 拉完了 / 5-6 NPC / 6-7 人上人 / 7-9 顶级 / 9-10 夯
+    （区间按下限归属：1.0 已算拉完了，9.0 起算夯）
     """
     if score is None:
         return TIERS[-1]

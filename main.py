@@ -545,7 +545,7 @@ class GameBoardPlugin(Star):
             "/撤榜 游戏名 —— 从本群移除（推荐人或管理员）",
             "/榜名 名称 —— 改本群榜单标题；/榜名 重置 恢复默认",
             "",
-            "分档：0-1 屎 · 2-4 拉完了 · 5-6 NPC · 6-7 人上人 · 7-9 顶级 · 9-10 夯",
+            "分档：0-1 屎 · 1-5 拉完了 · 5-6 NPC · 6-7 人上人 · 7-9 顶级 · 9-10 夯",
             "英文别名：recommend / rate / comment / game / board / niche / tag / unrate / remove",
             "",
             f"本群现有 {total} 个游戏、{votes} 票"
