@@ -66,6 +66,7 @@ QQ 群里一起给游戏打分，自动出「夯 / 顶级 / 人上人 / NPC / �
 | `comment_max_per_game` | 20 | 每人每游戏评论条数上限 |
 | `pin_recommender_comment` | true | 详情页置顶推荐人评论 |
 | `detail_max_comments` | 6 | 详情页最多渲染评论数 |
+| `image_keep_days` | 7 | 榜单图/详情图保留天数，超过的自动删（图发完就没用了，防止 images/ 越堆越大） |
 | `web_url` | 空 | 网页端地址，填了群友才能用 `/榜单网页` 拿登录码 |
 | `web_code_ttl` | 300 | 登录码有效期（秒），用一次即作废 |
 | `web_public_code` | false | 私聊发不出去时，是否退一步把码发群里 |

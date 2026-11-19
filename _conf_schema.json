@@ -99,5 +99,11 @@
     "hint": "留空则要求在群里发指令。填群号后，私聊也能拿码。",
     "type": "string",
     "default": ""
+  },
+  "image_keep_days": {
+    "description": "渲染图保留天数",
+    "type": "int",
+    "default": 7,
+    "hint": "榜单图/详情图发完就没用了，超过这么多天的自动删掉，防止 images/ 越堆越大。"
   }
 }

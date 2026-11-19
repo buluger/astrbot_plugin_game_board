@@ -159,6 +159,18 @@ def circle_avatar(path: str, size: int, label: str = "") -> Image.Image:
 # --------------------------------------------------------------------------- 榜单
 
 
+def _save_image(img, out_path: Path, quality: int = 85) -> Path:
+    """按后缀保存。榜单图照片多，PNG 能到 5 MB，JPEG 85 只要 1/4。"""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.suffix.lower() in {".jpg", ".jpeg"}:
+        img.convert("RGB").save(
+            out_path, "JPEG", quality=quality, optimize=True, progressive=True
+        )
+    else:
+        img.save(out_path, "PNG", optimize=True)
+    return out_path
+
+
 def render_board(
     rows: list[dict],
     out_path: Path,
@@ -265,9 +277,7 @@ def render_board(
                 )
         y += row_h
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(out_path, "PNG", optimize=True)
-    return out_path
+    return _save_image(img, out_path)
 
 
 # --------------------------------------------------------------------------- 详情
@@ -531,6 +541,4 @@ def render_detail(
             y += 26
         y += 18
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(out_path, "PNG", optimize=True)
-    return out_path
+    return _save_image(img, out_path)

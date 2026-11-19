@@ -194,7 +194,28 @@ class GameBoardPlugin(Star):
         await event.send(MessageChain([Plain(text)]))
 
     def _image_path(self, name: str) -> Path:
-        return self.image_dir / f"{safe_filename(name)}_{int(time.time() * 1000)}.png"
+        # JPEG：榜单图照片多，PNG 能到 5 MB，群里发图又慢又费流量
+        return self.image_dir / f"{safe_filename(name)}_{int(time.time() * 1000)}.jpg"
+
+    def _prune_images(self) -> None:
+        """清掉过期的渲染图，别让 images/ 越堆越大（config: image_keep_days）。"""
+        keep_days = max(1, int(self._cfg("image_keep_days", 7)))
+        cutoff = time.time() - keep_days * 86400
+        removed = 0
+        try:
+            for f in self.image_dir.iterdir():
+                if not f.is_file() or f.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+                    continue
+                try:
+                    if f.stat().st_mtime < cutoff:
+                        f.unlink()
+                        removed += 1
+                except OSError:
+                    continue
+        except OSError:
+            return
+        if removed:
+            logger.info(f"[game_board] 清理了 {removed} 张超过 {keep_days} 天的旧图")
 
     # ------------------------------------------------------------------ 数据源
 
@@ -1085,6 +1106,7 @@ class GameBoardPlugin(Star):
             await asyncio.to_thread(
                 render_board, rows, path, title, subtitle
             )
+            await asyncio.to_thread(self._prune_images)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"[game_board] 渲染榜单失败：{exc}")
             yield event.plain_result("出图失败了，稍后再试。")
@@ -1112,6 +1134,7 @@ class GameBoardPlugin(Star):
                 f"{base_title} · 小众游戏榜",
                 f"打分人数 < {threshold} 人 · 共 {len(niche)} 个",
             )
+            await asyncio.to_thread(self._prune_images)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"[game_board] 渲染小众榜失败：{exc}")
             yield event.plain_result("出图失败了，稍后再试。")
@@ -1148,6 +1171,7 @@ class GameBoardPlugin(Star):
                 avatar_dir=self.avatar_dir,
                 ratings=ratings,
             )
+            await asyncio.to_thread(self._prune_images)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"[game_board] 渲染详情失败：{exc}")
             yield event.plain_result("出图失败了，稍后再试。")
