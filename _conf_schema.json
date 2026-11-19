@@ -75,5 +75,29 @@
     "hint": "默认关闭，任何群友都能用 /榜名 改本群榜单标题。",
     "type": "bool",
     "default": false
+  },
+  "web_url": {
+    "description": "网页端地址",
+    "hint": "填了群友才能用 /榜单网页 拿登录码，例如 https://astrbot-game.duckdns.org 。留空则关闭该功能。",
+    "type": "string",
+    "default": ""
+  },
+  "web_code_ttl": {
+    "description": "网页端登录码有效期（秒）",
+    "hint": "默认 300，即 5 分钟；码用一次就作废。",
+    "type": "int",
+    "default": 300
+  },
+  "web_public_code": {
+    "description": "私聊发不出去时，允许把登录码直接发群里",
+    "hint": "默认关闭。开着方便，但群里其他人也能看到这个码（码绑的是发指令那个人的 QQ）。",
+    "type": "bool",
+    "default": false
+  },
+  "default_group": {
+    "description": "私聊发 /榜单网页 时默认用哪个群",
+    "hint": "留空则要求在群里发指令。填群号后，私聊也能拿码。",
+    "type": "string",
+    "default": ""
   }
 }

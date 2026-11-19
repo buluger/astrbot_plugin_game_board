@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import re
+import secrets
 import shutil
 import time
 from pathlib import Path
@@ -41,9 +42,12 @@ AVATAR_URL = "https://q1.qlogo.cn/g?b=qq&nk={uid}&s=100"
 
 COMMAND_NAMES = {
     "推荐", "打分", "点评", "榜单", "榜单详情", "小众游戏榜", "贴标签",
-    "撤分", "撤榜", "榜名", "榜单帮助", "添加", "manual",
-    "board", "game", "tag", "rate", "recommend",
+    "撤分", "撤榜", "榜名", "榜单帮助", "添加", "manual", "榜单网页", "网页",
+    "board", "game", "tag", "rate", "recommend", "web",
 }
+
+# 登录码字符表：去掉 0/O/1/I 这些容易看混的
+CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 
 USAGE = (
     "用法：\n"
@@ -56,7 +60,8 @@ USAGE = (
     "/贴标签 游戏名 标签... —— 补标签\n"
     "/撤分 游戏名 —— 撤销自己的评分\n"
     "/撤榜 游戏名 —— 移除推荐（推荐人/管理员）\n"
-    "/榜名 名称 —— 改本群榜单标题"
+    "/榜名 名称 —— 改本群榜单标题\n"
+    "/榜单网页 —— 拿网页端的一次性登录码"
 )
 
 
@@ -544,9 +549,10 @@ class GameBoardPlugin(Star):
             "/撤分 游戏名 —— 撤销自己那一票",
             "/撤榜 游戏名 —— 从本群移除（推荐人或管理员）",
             "/榜名 名称 —— 改本群榜单标题；/榜名 重置 恢复默认",
+            "/榜单网页 —— 拿一次性登录码，去网页上看榜 / 打分 / 写评论",
             "",
             "分档：0-1 屎 · 1-5 拉完了 · 5-6 NPC · 6-7 人上人 · 7-9 顶级 · 9-10 夯",
-            "英文别名：recommend / rate / comment / game / board / niche / tag / unrate / remove",
+            "英文别名：recommend / rate / comment / game / board / niche / tag / unrate / remove / web",
             "",
             f"本群现有 {total} 个游戏、{votes} 票"
             + (f"，其中 {niche} 个是小众榜候选" if niche else ""),
@@ -555,6 +561,117 @@ class GameBoardPlugin(Star):
         if not total:
             lines.append("（榜单还是空的，先来第一个推荐吧）")
         yield event.plain_result("\n".join(lines))
+
+    @filter.command("榜单网页", alias={"网页", "web", "网页端", "网页打分"})
+    async def cmd_web(self, event: AstrMessageEvent):
+        """私聊发你一个网页端的一次性登录码"""
+        url = str(self._cfg("web_url", "") or "").strip()
+        if not url:
+            yield event.plain_result(
+                "网页端还没配地址。让管理员在插件配置里填上「网页端地址」（web_url）。"
+            )
+            return
+        group = self._group(event)
+        uid, nick = self._sender(event)
+        in_group = not group.startswith("private:")
+        if not in_group:
+            group = str(self._cfg("default_group", "") or "").strip()
+            if not group:
+                yield event.plain_result("网页端按群登录，回群里发 /榜单网页，我把码私聊发给你。")
+                return
+
+        ttl = max(60, int(self._cfg("web_code_ttl", 300)))
+        code = await self._make_login_code()
+        avatar = await self._avatar_file(uid)
+        await self.db.create_login_code(code, group, uid, nick, avatar, ttl)
+        minutes = max(1, ttl // 60)
+        text = (
+            f"网页端登录码：{code}\n"
+            f"{url}\n\n"
+            f"进去后填「你的 QQ 号」+ 这个码，{minutes} 分钟内有效，用一次就作废。\n"
+            "码跟你 QQ 号绑定，别人拿到也进不来。\n"
+            "网页上能看全群榜单、给游戏打分、写评论。"
+        )
+
+        ok, err = await self._send_code_private(event, uid, group, text)
+        if ok:
+            if in_group:
+                yield event.plain_result(
+                    "登录码私聊发给你了，%d 分钟内有效。" % minutes
+                )
+            return
+
+        logger.warning(f"[game_board] 私聊发码失败 uid={uid} err={err}")
+        if bool(self._cfg("web_public_code", False)):
+            yield event.plain_result(f"{text}\n\n（私聊发不出去，只能发群里了）")
+        else:
+            yield event.plain_result(
+                f"登录码私聊发不出去。原因：{self._priv_fail_reason(err)}\n\n"
+                "两个办法，任选一个：\n"
+                "1）加我好友，加完再发一次 /榜单网页（好友私聊最稳）\n"
+                "2）群主在群设置里打开「允许群成员发起临时会话」，开完全群都能收到私聊"
+            )
+
+    @staticmethod
+    def _priv_fail_reason(err: str) -> str:
+        e = err or ""
+        if "103" in e and "临时会话" in e:
+            return "你不是我的好友，本群也关了「群成员发起临时会话」"
+        if "103" in e:
+            return "QQ 拒绝了这次私聊（可能被风控）"
+        if "好友" in e:
+            return "你不是我的好友，QQ 不让给陌生人发私聊"
+        return (e.splitlines()[0] if e else "未知原因")[:60]
+
+    async def _send_code_private(
+        self, event: AstrMessageEvent, uid: str, group: str, text: str
+    ) -> tuple[bool, str]:
+        """私聊发码：先走普通私聊（好友），再退群临时会话"""
+        bot = getattr(event, "bot", None)
+        if bot is None or not hasattr(bot, "send_private_msg"):
+            return False, "当前平台不支持发私聊"
+        uid_s = str(uid)
+        if not uid_s.isdigit():
+            return False, "拿不到 QQ 号"
+        payload = [{"type": "text", "data": {"text": text}}]
+        uid_int = int(uid_s)
+        errs: list[str] = []
+        # 1) 普通私聊：对方是好友时才通
+        try:
+            ret = await bot.send_private_msg(user_id=uid_int, message=payload)
+            if self._send_ok(ret):
+                return True, ""
+            errs.append(f"私聊={ret}")
+        except Exception as exc:  # noqa: BLE001
+            errs.append(f"私聊={exc}")
+        # 2) 群临时会话：需要群主没关「允许群成员发起临时会话」
+        if str(group).isdigit():
+            try:
+                ret = await bot.send_private_msg(
+                    user_id=uid_int, group_id=int(group), message=payload
+                )
+                if self._send_ok(ret):
+                    return True, ""
+                errs.append(f"临时会话={ret}")
+            except Exception as exc:  # noqa: BLE001
+                errs.append(f"临时会话={exc}")
+        return False, " | ".join(errs)[:400]
+
+    @staticmethod
+    def _send_ok(ret) -> bool:
+        if isinstance(ret, dict):
+            if "retcode" in ret:
+                return int(ret.get("retcode") or 0) == 0
+            if ret.get("status") == "failed":
+                return False
+        return True
+
+    async def _make_login_code(self) -> str:
+        for _ in range(20):
+            code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(6))
+            if not await self.db.code_exists(code):
+                return code
+        return "".join(secrets.choice(CODE_ALPHABET) for _ in range(6))
 
     @filter.command("推荐", alias={"上榜", "recommend"})
     async def cmd_recommend(self, event: AstrMessageEvent):
@@ -597,7 +714,7 @@ class GameBoardPlugin(Star):
             if not manual_game:
                 yield event.plain_result("没建成功，稍后再试。")
                 return
-            await self.db.add_submission(group, manual_game["id"], uid)
+            await self.db.add_submission(group, manual_game["id"], uid, nickname=nick)
             yield event.plain_result(
                 f"《{term}》已手动加入（仅本群可见）。给它打个分吧（0-10，可附评论）："
             )
@@ -633,7 +750,7 @@ class GameBoardPlugin(Star):
         game = await self._register_game(
             info, group, uid, display_name=chosen.name_cn or info.name_cn
         )
-        await self.db.add_submission(group, game["id"], uid)
+        await self.db.add_submission(group, game["id"], uid, nickname=nick)
 
         yield event.plain_result(
             f"《{info.name_cn or info.name}》已加入候选，"
@@ -916,7 +1033,7 @@ class GameBoardPlugin(Star):
         if not game:
             yield event.plain_result("没建成功，稍后再试。")
             return
-        await self.db.add_submission(group, game["id"], uid)
+        await self.db.add_submission(group, game["id"], uid, nickname=nick)
         yield event.plain_result(f"《{term}》的条目建好了（仅本群可见）。给它打个分吧（0-10，可附评论）：")
 
         score, comment = await self._ask_score(event, term)

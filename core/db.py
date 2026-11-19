@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     game_id    INTEGER NOT NULL,
     user_id    TEXT NOT NULL,
     comment    TEXT NOT NULL DEFAULT '',
+    nickname   TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     PRIMARY KEY (group_id, game_id)
 );
@@ -88,6 +89,19 @@ CREATE TABLE IF NOT EXISTS custom_tags (
     created_at INTEGER NOT NULL,
     UNIQUE (group_id, game_id, tag_norm)
 );
+
+-- 网页端一次性登录码：插件写、网页端读并核销
+CREATE TABLE IF NOT EXISTS web_login_codes (
+    code       TEXT PRIMARY KEY,
+    group_id   TEXT NOT NULL,
+    user_id    TEXT NOT NULL,
+    nickname   TEXT NOT NULL DEFAULT '',
+    avatar     TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at    INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_web_codes_expire ON web_login_codes(expires_at);
 """
 
 
@@ -101,7 +115,16 @@ class GameStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """给老库补列（submissions.nickname 是 0.2.2 加的）"""
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(submissions)")}
+        if "nickname" not in cols:
+            self._conn.execute(
+                "ALTER TABLE submissions ADD COLUMN nickname TEXT NOT NULL DEFAULT ''"
+            )
 
     def close(self) -> None:
         with self._lock:
@@ -275,14 +298,20 @@ class GameStore:
     # ---------- 推荐 / 评分 / 评论 ----------
 
     async def add_submission(
-        self, group_id: str, game_id: int, user_id: str, comment: str = ""
+        self,
+        group_id: str,
+        game_id: int,
+        user_id: str,
+        comment: str = "",
+        nickname: str = "",
     ) -> None:
         await self.execute(
-            """INSERT INTO submissions (group_id, game_id, user_id, comment, created_at)
-               VALUES (?,?,?,?,?)
+            """INSERT INTO submissions (group_id, game_id, user_id, comment, nickname, created_at)
+               VALUES (?,?,?,?,?,?)
                ON CONFLICT(group_id, game_id) DO UPDATE SET
-                 comment = CASE WHEN excluded.comment != '' THEN excluded.comment ELSE submissions.comment END""",
-            (group_id, game_id, user_id, comment, int(time.time())),
+                 comment = CASE WHEN excluded.comment != '' THEN excluded.comment ELSE submissions.comment END,
+                 nickname = CASE WHEN excluded.nickname != '' THEN excluded.nickname ELSE submissions.nickname END""",
+            (group_id, game_id, user_id, comment, nickname, int(time.time())),
         )
 
     async def has_submission(self, group_id: str, game_id: int) -> dict | None:
@@ -432,3 +461,30 @@ class GameStore:
             return True
         except sqlite3.IntegrityError:
             return False
+
+    # ---------- 网页端登录码 ----------
+
+    async def create_login_code(
+        self,
+        code: str,
+        group_id: str,
+        user_id: str,
+        nickname: str = "",
+        avatar: str = "",
+        ttl: int = 300,
+    ) -> None:
+        """发一次新码，顺手清掉一小时前的旧码。"""
+        now = int(time.time())
+        await self.execute(
+            "DELETE FROM web_login_codes WHERE expires_at < ?", (now - 3600,)
+        )
+        await self.execute(
+            """INSERT INTO web_login_codes
+               (code, group_id, user_id, nickname, avatar, created_at, expires_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (code, group_id, user_id, nickname, avatar, now, now + max(60, int(ttl))),
+        )
+
+    async def code_exists(self, code: str) -> bool:
+        rows = await self.query("SELECT 1 AS x FROM web_login_codes WHERE code = ?", (code,))
+        return bool(rows)
