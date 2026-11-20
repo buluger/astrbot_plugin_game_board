@@ -83,7 +83,7 @@ class OwnerSessionFilter(SessionFilter):
 @register(
     PLUGIN_NAME,
     "buluger",
-    "群友推荐游戏、打分评论，自动抓取封面标签，输出五档榜单与 Steam 风格详情卡",
+    "群友推荐游戏、打分评论，自动抓取封面标签，输出六档榜单与 Steam 风格详情卡",
     "0.1.0",
     repo="https://github.com/buluger/astrbot_plugin_game_board",
 )
